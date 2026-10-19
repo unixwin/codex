@@ -50,6 +50,11 @@ permissions:
 
 jobs:
   release:
+  # `contents: write` is what lets the release step attach the package
+  # zip and update the release; the default token is read-only, which
+  # failed the first publish run.
+  permissions:
+    contents: write
     name: Build, package, and optionally publish
     runs-on: windows-latest
     timeout-minutes: 360
@@ -256,17 +261,6 @@ jobs:
             ${{ runner.temp }}/niu-codex-*.zip
             ${{ runner.temp }}/npm/*.tgz
 
-      # The wpm index points at this asset, so it has to exist in a release -
-      # workflow artifacts need auth and expire.
-      - name: Attach the package zip to a release
-        if: ${{ inputs.publish }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: codex-v${{ steps.version.outputs.version }}
-          name: "Codex ${{ steps.version.outputs.version }} (windows x64)"
-          prerelease: true
-          files: ${{ runner.temp }}/niu-codex-*.zip
-
       - name: Publish to npm
         if: ${{ inputs.publish }}
         shell: bash
@@ -281,6 +275,17 @@ jobs:
           npm publish "$platform" --tag win32-x64 --access public
           npm publish "$meta" --tag "${{ inputs.npm_tag }}" --access public
           echo "published @unixwin/codex@$version (platform: win32-x64, meta tag: ${{ inputs.npm_tag }})"
+
+      # The wpm index points at this asset, so it has to exist in a release -
+      # workflow artifacts need auth and expire.
+      - name: Attach the package zip to a release
+        if: ${{ inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: codex-v${{ steps.version.outputs.version }}
+          name: "Codex ${{ steps.version.outputs.version }} (windows x64)"
+          prerelease: true
+          files: ${{ runner.temp }}/niu-codex-*.zip
 
       # Same shape as the WinuxCmd release: rewrite the package entry in
       # unixwin/wpm-source and let the PR merge itself. Warnings, not failures,

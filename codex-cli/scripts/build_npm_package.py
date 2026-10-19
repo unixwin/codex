@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Stage and optionally package the @cmx666/codex npm module."""
+"""Stage and optionally package the @unixwin/codex npm module."""
 
 import argparse
 import json
@@ -15,49 +15,49 @@ CODEX_CLI_ROOT = SCRIPT_DIR.parent
 REPO_ROOT = CODEX_CLI_ROOT.parent
 RESPONSES_API_PROXY_NPM_ROOT = REPO_ROOT / "codex-rs" / "responses-api-proxy" / "npm"
 CODEX_SDK_ROOT = REPO_ROOT / "sdk" / "typescript"
-CODEX_NPM_NAME = "@cmx666/codex"
+CODEX_NPM_NAME = "@unixwin/codex"
 CODEX_PACKAGE_COMPONENT = "codex-package"
 
 # `npm_name` is the local optional-dependency alias consumed by `bin/codex.js`.
-# The underlying package published to npm is always `@cmx666/codex`.
+# The underlying package published to npm is always `@unixwin/codex`.
 CODEX_PLATFORM_PACKAGES: dict[str, dict[str, str]] = {
     "codex-linux-x64": {
-        "npm_name": "@cmx666/codex-linux-x64",
+        "npm_name": "@unixwin/codex-linux-x64",
         "npm_tag": "linux-x64",
         "target_triple": "x86_64-unknown-linux-musl",
         "os": "linux",
         "cpu": "x64",
     },
     "codex-linux-arm64": {
-        "npm_name": "@cmx666/codex-linux-arm64",
+        "npm_name": "@unixwin/codex-linux-arm64",
         "npm_tag": "linux-arm64",
         "target_triple": "aarch64-unknown-linux-musl",
         "os": "linux",
         "cpu": "arm64",
     },
     "codex-darwin-x64": {
-        "npm_name": "@cmx666/codex-darwin-x64",
+        "npm_name": "@unixwin/codex-darwin-x64",
         "npm_tag": "darwin-x64",
         "target_triple": "x86_64-apple-darwin",
         "os": "darwin",
         "cpu": "x64",
     },
     "codex-darwin-arm64": {
-        "npm_name": "@cmx666/codex-darwin-arm64",
+        "npm_name": "@unixwin/codex-darwin-arm64",
         "npm_tag": "darwin-arm64",
         "target_triple": "aarch64-apple-darwin",
         "os": "darwin",
         "cpu": "arm64",
     },
     "codex-win32-x64": {
-        "npm_name": "@cmx666/codex-win32-x64",
+        "npm_name": "@unixwin/codex-win32-x64",
         "npm_tag": "win32-x64",
         "target_triple": "x86_64-pc-windows-msvc",
         "os": "win32",
         "cpu": "x64",
     },
     "codex-win32-arm64": {
-        "npm_name": "@cmx666/codex-win32-arm64",
+        "npm_name": "@unixwin/codex-win32-arm64",
         "npm_tag": "win32-arm64",
         "target_triple": "aarch64-pc-windows-msvc",
         "os": "win32",

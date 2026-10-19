@@ -45,16 +45,14 @@ on:
         type: string
         default: "latest"
 
+# `contents: write` is what lets the release step attach the package zip
+# and update the release; the default token is read-only, which failed
+# the first publish run.
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   release:
-  # `contents: write` is what lets the release step attach the package
-  # zip and update the release; the default token is read-only, which
-  # failed the first publish run.
-  permissions:
-    contents: write
     name: Build, package, and optionally publish
     runs-on: windows-latest
     timeout-minutes: 360

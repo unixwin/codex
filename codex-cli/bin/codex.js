@@ -14,12 +14,12 @@ const require = createRequire(import.meta.url);
 const codexPackageRoot = realpathSync(path.join(__dirname, ".."));
 
 const PLATFORM_PACKAGE_BY_TARGET = {
-  "x86_64-unknown-linux-musl": "@cmx666/codex-linux-x64",
-  "aarch64-unknown-linux-musl": "@cmx666/codex-linux-arm64",
-  "x86_64-apple-darwin": "@cmx666/codex-darwin-x64",
-  "aarch64-apple-darwin": "@cmx666/codex-darwin-arm64",
-  "x86_64-pc-windows-msvc": "@cmx666/codex-win32-x64",
-  "aarch64-pc-windows-msvc": "@cmx666/codex-win32-arm64",
+  "x86_64-unknown-linux-musl": "@unixwin/codex-linux-x64",
+  "aarch64-unknown-linux-musl": "@unixwin/codex-linux-arm64",
+  "x86_64-apple-darwin": "@unixwin/codex-darwin-x64",
+  "aarch64-apple-darwin": "@unixwin/codex-darwin-arm64",
+  "x86_64-pc-windows-msvc": "@unixwin/codex-win32-x64",
+  "aarch64-pc-windows-msvc": "@unixwin/codex-win32-arm64",
 };
 
 const { platform, arch } = process;
@@ -98,10 +98,10 @@ function findCodexExecutable() {
   const packageManager = detectPackageManager();
   const updateCommand =
     packageManager === "bun"
-      ? "bun install -g @cmx666/codex@latest"
+      ? "bun install -g @unixwin/codex@latest"
       : packageManager === "pnpm"
-        ? "pnpm add -g @cmx666/codex@latest"
-        : "npm install -g @cmx666/codex@latest";
+        ? "pnpm add -g @unixwin/codex@latest"
+        : "npm install -g @unixwin/codex@latest";
   throw new Error(
     `Missing optional dependency ${platformPackage}. Reinstall Codex: ${updateCommand}`,
   );
@@ -122,7 +122,7 @@ function isPnpmOwnedCodexInstall(nodeModulesDir) {
 
   try {
     return (
-      realpathSync(path.join(nodeModulesDir, "@cmx666", "codex")) ===
+      realpathSync(path.join(nodeModulesDir, "@unixwin", "codex")) ===
       codexPackageRoot
     );
   } catch {

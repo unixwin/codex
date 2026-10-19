@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Stage, pack, and install-test the @cmx666/codex npm packages.
+# Stage, pack, and install-test the @unixwin/codex npm packages.
 #
 # Verifies the thing that actually breaks in practice: a tarball that installs
 # but is missing a binary, a resource, or the launcher's vendor tree.
@@ -101,18 +101,18 @@ PY
 
 step "5/6 install the meta package and simulate the npm alias optional dependency"
 # The meta package ships only bin/codex.js: its binaries arrive through
-# optionalDependencies as `npm:@cmx666/codex@<version>-win32-x64`, which npm
-# installs under the alias path node_modules/@cmx666/codex-win32-x64/. Nothing
+# optionalDependencies as `npm:@unixwin/codex@<version>-win32-x64`, which npm
+# installs under the alias path node_modules/@unixwin/codex-win32-x64/. Nothing
 # is published yet, so unpack the platform tarball to that exact path. This is
 # the same resolution the launcher performs in a real install.
 PROJ="$WORK_DIR/proj"
 rm -rf "$PROJ"; mkdir -p "$PROJ"
 (cd "$PROJ" && npm init -y >/dev/null 2>&1)
-META_TGZ="$(ls "$WORK_DIR"/cmx666-codex-*.tgz | grep -v "$PLATFORM_TAG" | head -1)"
-PLATFORM_TGZ="$(ls "$WORK_DIR"/cmx666-codex-*-"$PLATFORM_TAG".tgz | head -1)"
+META_TGZ="$(ls "$WORK_DIR"/unixwin-codex-*.tgz | grep -v "$PLATFORM_TAG" | head -1)"
+PLATFORM_TGZ="$(ls "$WORK_DIR"/unixwin-codex-*-"$PLATFORM_TAG".tgz | head -1)"
 [ -n "$META_TGZ" ] && [ -n "$PLATFORM_TGZ" ] || { echo "missing a tarball"; exit 1; }
 (cd "$PROJ" && npm install --omit=optional --no-audit --no-fund "$META_TGZ")
-ALIAS_DIR="$PROJ/node_modules/@cmx666/codex-$PLATFORM_TAG"
+ALIAS_DIR="$PROJ/node_modules/@unixwin/codex-$PLATFORM_TAG"
 # Unpack with Python's tarfile, not tar. On Windows the runner's temp dir is a
 # native `D:\a\_temp` path, and tar reads the drive colon as a remote host
 # ("Cannot connect to D:"). --force-local and cygpath normalization both still
@@ -146,11 +146,11 @@ with tarfile.open(tgz) as archive:
         else:
             print(f"  skipping non-file member: {member.name}")
 PY
-echo "  meta package   : $PROJ/node_modules/@cmx666/codex"
+echo "  meta package   : $PROJ/node_modules/@unixwin/codex"
 echo "  platform alias : $ALIAS_DIR ($(find "$ALIAS_DIR" -type f | wc -l) files)"
 echo "  resolved by the launcher:"
-node -e "console.log('    ' + require.resolve('@cmx666/codex-$PLATFORM_TAG/package.json'))" --prefix "$PROJ" 2>/dev/null \
-  || (cd "$PROJ" && node -e "console.log('    ' + require.resolve('@cmx666/codex-$PLATFORM_TAG/package.json'))")
+node -e "console.log('    ' + require.resolve('@unixwin/codex-$PLATFORM_TAG/package.json'))" --prefix "$PROJ" 2>/dev/null \
+  || (cd "$PROJ" && node -e "console.log('    ' + require.resolve('@unixwin/codex-$PLATFORM_TAG/package.json'))")
 (cd "$PROJ" && ./node_modules/.bin/codex --version)
 (cd "$PROJ" && ./node_modules/.bin/codex --help 2>&1 | head -3)
 

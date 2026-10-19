@@ -104,9 +104,9 @@ apart:
 3. Re-run it with `publish=true` (needs the `NPM_TOKEN` secret) to publish.
 
 Publish order is enforced by the workflow and matters: the meta package
-`@cmx666/codex` ships only `bin/codex.js`, and its binaries arrive through
-`optionalDependencies` as `npm:@cmx666/codex@<version>-win32-x64`, which npm
-installs under `node_modules/@cmx666/codex-win32-x64/`. Publishing the meta
+`@unixwin/codex` ships only `bin/codex.js`, and its binaries arrive through
+`optionalDependencies` as `npm:@unixwin/codex@<version>-win32-x64`, which npm
+installs under `node_modules/@unixwin/codex-win32-x64/`. Publishing the meta
 package first installs into a "missing optional dependency" error for everyone
 until the platform package lands.
 

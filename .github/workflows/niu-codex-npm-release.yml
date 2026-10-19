@@ -1,6 +1,6 @@
 name: niu-codex-npm-release
 
-# Builds the release artifacts for the @cmx666/codex npm packages from a pinned
+# Builds the release artifacts for the @unixwin/codex npm packages from a pinned
 # commit, using upstream's own package builder so the layout matches
 # codex-rs/scripts/codex_package/layout.py exactly.
 #
@@ -20,12 +20,18 @@ name: niu-codex-npm-release
 # for the same 10 GB repo budget.
 #
 # Publish order matters. The meta package ships only bin/codex.js; its binaries
-# arrive through optionalDependencies as `npm:@cmx666/codex@<version>-win32-x64`.
+# arrive through optionalDependencies as `npm:@unixwin/codex@<version>-win32-x64`.
 # Publish the platform package first, or the meta package installs into a
 # "missing optional dependency" error.
 #
-# Setup: add an npm automation token for the @cmx666 scope as the repository
-# secret NPM_TOKEN before running with publish=true.
+# Setup: the repository needs two secrets before running with publish=true.
+#   NPM_TOKEN         - an npm automation token with publish rights on the
+#                       @unixwin scope (the org exists; the token must be able
+#                       to publish there).
+#   WPM_SOURCE_TOKEN  - a token with `repo` on unixwin/wpm-source, used to open
+#                       and merge the index pull request. Without it the index
+#                       step warns and skips, and `wpm install codex` keeps
+#                       pointing at the previous release.
 
 on:
   workflow_dispatch:
@@ -250,6 +256,17 @@ jobs:
             ${{ runner.temp }}/niu-codex-*.zip
             ${{ runner.temp }}/npm/*.tgz
 
+      # The wpm index points at this asset, so it has to exist in a release -
+      # workflow artifacts need auth and expire.
+      - name: Attach the package zip to a release
+        if: ${{ inputs.publish }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: codex-v${{ steps.version.outputs.version }}
+          name: "Codex ${{ steps.version.outputs.version }} (windows x64)"
+          prerelease: true
+          files: ${{ runner.temp }}/niu-codex-*.zip
+
       - name: Publish to npm
         if: ${{ inputs.publish }}
         shell: bash
@@ -258,9 +275,54 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ steps.version.outputs.version }}"
-          platform="$(ls "$RUNNER_TEMP"/npm/cmx666-codex-"$version"-win32-x64.tgz)"
-          meta="$(ls "$RUNNER_TEMP"/npm/cmx666-codex-"$version".tgz)"
+          platform="$(ls "$RUNNER_TEMP"/npm/unixwin-codex-"$version"-win32-x64.tgz)"
+          meta="$(ls "$RUNNER_TEMP"/npm/unixwin-codex-"$version".tgz)"
           # Platform first: the meta package depends on it.
           npm publish "$platform" --tag win32-x64 --access public
           npm publish "$meta" --tag "${{ inputs.npm_tag }}" --access public
-          echo "published @cmx666/codex@$version (platform: win32-x64, meta tag: ${{ inputs.npm_tag }})"
+          echo "published @unixwin/codex@$version (platform: win32-x64, meta tag: ${{ inputs.npm_tag }})"
+
+      # Same shape as the WinuxCmd release: rewrite the package entry in
+      # unixwin/wpm-source and let the PR merge itself. Warnings, not failures,
+      # when the token is absent - a missing index update must not invalidate an
+      # otherwise good npm release.
+      - name: Update the WPM package index
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.WPM_SOURCE_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning::WPM_SOURCE_TOKEN is not configured; the wpm index keeps pointing at the previous release"
+            exit 0
+          fi
+          zip="$(ls "$RUNNER_TEMP"/niu-codex-"$VERSION"-windows-x86_64.zip)"
+          rm -rf "$RUNNER_TEMP/wpm-source"
+          git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/unixwin/wpm-source.git" "$RUNNER_TEMP/wpm-source"
+          pwsh -NoProfile -File scripts/niu/update-wpm-index.ps1 \
+            -IndexPath "$RUNNER_TEMP/wpm-source/index.json" \
+            -Version "$VERSION" \
+            -ZipPath "$zip" \
+            -ReleaseTag "codex-v${VERSION}"
+          cd "$RUNNER_TEMP/wpm-source"
+          if git diff --quiet -- index.json; then
+            echo "wpm index already matches codex ${VERSION}."
+            exit 0
+          fi
+          branch="automation/codex-${VERSION}-index"
+          title="index: codex ${VERSION}"
+          body="Automated update from unixwin/codex ${VERSION} (asset: $(basename "$zip"))."
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add index.json
+          git commit -m "$title"
+          git push --force-with-lease origin "$branch"
+          pr_url="$(gh pr list --repo unixwin/wpm-source --head "$branch" --state open --json url --jq '.[0].url')"
+          if [ -z "$pr_url" ]; then
+            pr_url="$(gh pr create --repo unixwin/wpm-source --base main --head "$branch" --title "$title" --body "$body")"
+          fi
+          gh pr merge "$pr_url" --repo unixwin/wpm-source --squash --delete-branch ||
+            gh pr merge "$pr_url" --repo unixwin/wpm-source --squash --delete-branch --auto

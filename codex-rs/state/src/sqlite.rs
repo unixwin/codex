@@ -6,7 +6,11 @@
 )]
 
 use crate::DbTelemetry;
+use crate::migrations::MigrationChecksumStatus;
+use crate::migrations::canonical_migrator_for;
+use crate::migrations::inspect_migration_checksums;
 use crate::migrations::repair_legacy_recency_migration_version;
+use crate::migrations::repair_line_ending_migration_checksums;
 use crate::runtime::RuntimeDbInitError;
 use crate::telemetry;
 use crate::telemetry::DbKind;
@@ -111,6 +115,13 @@ pub struct RuntimeDbPath {
     pub path: PathBuf,
 }
 
+/// Migration checksum status of a runtime database.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RuntimeDbMigrationStatus {
+    pub label: &'static str,
+    pub status: MigrationChecksumStatus,
+}
+
 /// Resolved configuration shared by all Codex SQLite connections.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SqliteConfig {
@@ -169,6 +180,32 @@ impl SqliteConfig {
                 path: spec.path(self.home()),
             })
             .collect()
+    }
+
+    /// Compare the applied migration checksums of every runtime database with
+    /// the checksums this build embeds.
+    ///
+    /// Databases that do not exist yet are skipped because they carry no
+    /// migration history.
+    pub async fn runtime_migration_status(&self) -> Vec<RuntimeDbMigrationStatus> {
+        let mut statuses = Vec::new();
+        for spec in RUNTIME_DBS.iter() {
+            let path = spec.path(self.home());
+            if !path.is_file() {
+                continue;
+            }
+            let Ok(pool) = self.open_read_only_pool(&path).await else {
+                continue;
+            };
+            let status =
+                inspect_migration_checksums(&pool, &canonical_migrator_for(spec.kind)).await;
+            pool.close().await;
+            statuses.push(RuntimeDbMigrationStatus {
+                label: spec.label,
+                status,
+            });
+        }
+        statuses
     }
 
     pub(super) async fn open_state_db(
@@ -255,6 +292,7 @@ impl SqliteConfig {
             if matches!(spec.kind, DbKind::State) {
                 repair_legacy_recency_migration_version(&pool, migrator).await?;
             }
+            repair_line_ending_migration_checksums(&pool, migrator).await?;
             migrator.run(&pool).await.map_err(anyhow::Error::from)
         }
         .await;

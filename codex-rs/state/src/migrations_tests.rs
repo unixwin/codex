@@ -1,14 +1,19 @@
 use codex_utils_absolute_path::test_support::PathExt;
 use pretty_assertions::assert_eq;
+use sqlx::AssertSqlSafe;
 use sqlx::Connection;
 use sqlx::Row;
+use sqlx::SqlSafeStr;
 use sqlx::migrate::Migration;
 use sqlx::migrate::Migrator;
 use std::borrow::Cow;
 
 use super::STATE_MIGRATOR;
 use super::THREAD_HISTORY_MIGRATOR;
+use super::migration_checksum;
 use super::repair_legacy_recency_migration_version;
+use super::repair_line_ending_migration_checksums;
+use super::runtime_state_migrator;
 use crate::PINNED_THREAD_SECTION_ID;
 use crate::PINNED_THREAD_SECTION_NAME;
 
@@ -30,6 +35,33 @@ fn migrator_through(version: i64) -> Migrator {
         create_schemas: STATE_MIGRATOR.create_schemas.clone(),
         no_tx: STATE_MIGRATOR.no_tx,
     }
+}
+
+/// Build a migrator whose migration SQL uses the given line endings, mirroring
+/// a build that checked the migration files out on a different platform.
+fn migrator_with_line_endings<F>(line_ending_for: F) -> Migrator
+where
+    F: Fn(i64) -> &'static str,
+{
+    let migrations = STATE_MIGRATOR
+        .migrations
+        .iter()
+        .map(|migration| {
+            let sql = migration
+                .sql
+                .as_str()
+                .replace("\r\n", "\n")
+                .replace('\n', line_ending_for(migration.version));
+            Migration::new(
+                migration.version,
+                migration.description.clone(),
+                migration.migration_type,
+                AssertSqlSafe(sql).into_sql_str(),
+                migration.no_tx,
+            )
+        })
+        .collect::<Vec<_>>();
+    Migrator::with_migrations(migrations)
 }
 
 #[tokio::test]
@@ -990,6 +1022,169 @@ async fn repairs_recency_migration_that_was_applied_as_version_38() {
         .map(|migration| (migration.version, migration.checksum.to_vec()))
         .collect::<Vec<_>>();
     assert_eq!(applied, expected);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn runtime_migrator_embeds_line_ending_independent_checksums() {
+    let migrator = runtime_state_migrator();
+
+    for migration in migrator.iter() {
+        assert!(
+            !migration.sql.as_str().contains("\r\n"),
+            "migration {} should not embed CRLF line endings",
+            migration.version
+        );
+    }
+
+    // The embedded checksum must be the checksum of the LF form of the
+    // migration, no matter which line endings the build tree used.
+    for migration in STATE_MIGRATOR.migrations.iter() {
+        let canonical = migrator
+            .iter()
+            .find(|candidate| candidate.version == migration.version)
+            .expect("canonical migration should exist");
+        let lf = migration.sql.as_str().replace("\r\n", "\n");
+        assert_eq!(
+            canonical.checksum.as_ref(),
+            migration_checksum(&lf).as_slice(),
+            "migration {} should use the line ending independent checksum",
+            migration.version
+        );
+    }
+}
+
+#[tokio::test]
+async fn repairs_migration_checksum_that_differs_only_by_line_endings() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.state_db_path())
+        .await
+        .expect("sqlite database should open");
+
+    // A build that checked the migration files out with CRLF line endings
+    // records the CRLF checksum in the database.
+    migrator_with_line_endings(|_| "\r\n")
+        .run(&pool)
+        .await
+        .expect("CRLF migrations should apply");
+
+    let canonical = runtime_state_migrator();
+    assert!(
+        canonical.run(&pool).await.is_err(),
+        "the canonical migrator should reject the CRLF checksum before the repair"
+    );
+
+    repair_line_ending_migration_checksums(&pool, &canonical)
+        .await
+        .expect("line ending repair should succeed");
+    canonical
+        .run(&pool)
+        .await
+        .expect("canonical migrations should apply after the repair");
+
+    let applied = sqlx::query("SELECT version, checksum FROM _sqlx_migrations ORDER BY version")
+        .fetch_all(&pool)
+        .await
+        .expect("applied migrations should load")
+        .into_iter()
+        .map(|row| {
+            (
+                row.get::<i64, _>("version"),
+                row.get::<Vec<u8>, _>("checksum"),
+            )
+        })
+        .collect::<Vec<_>>();
+    let expected = canonical
+        .iter()
+        .map(|migration| (migration.version, migration.checksum.to_vec()))
+        .collect::<Vec<_>>();
+    assert_eq!(applied, expected);
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn repairs_migration_checksum_recorded_with_mixed_line_endings() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.state_db_path())
+        .await
+        .expect("sqlite database should open");
+
+    // A database can end up with a mix of checksums when it was migrated by
+    // builds that used different line endings for the migration files.
+    migrator_with_line_endings(|version| if version == 48 { "\n" } else { "\r\n" })
+        .run(&pool)
+        .await
+        .expect("mixed line ending migrations should apply");
+
+    let canonical = runtime_state_migrator();
+    assert!(
+        canonical.run(&pool).await.is_err(),
+        "the canonical migrator should reject the mixed checksums before the repair"
+    );
+
+    repair_line_ending_migration_checksums(&pool, &canonical)
+        .await
+        .expect("line ending repair should succeed");
+    canonical
+        .run(&pool)
+        .await
+        .expect("canonical migrations should apply after the repair");
+
+    pool.close().await;
+}
+
+#[tokio::test]
+async fn does_not_repair_migration_checksum_that_changed_beyond_line_endings() {
+    let sqlite_home = crate::runtime::test_support::unique_temp_dir();
+    tokio::fs::create_dir_all(&sqlite_home)
+        .await
+        .expect("sqlite home should be created");
+    let _cleanup = scopeguard::guard(sqlite_home.clone(), |sqlite_home| {
+        let _ = std::fs::remove_dir_all(sqlite_home);
+    });
+    let sqlite = crate::SqliteConfig::new_for_testing(sqlite_home.as_path().abs());
+    let pool = sqlite
+        .open_read_write_pool(&sqlite.state_db_path())
+        .await
+        .expect("sqlite database should open");
+
+    STATE_MIGRATOR
+        .run(&pool)
+        .await
+        .expect("current migrations should apply");
+    sqlx::query("UPDATE _sqlx_migrations SET checksum = ? WHERE version = ?")
+        .bind(vec![0_u8; 48])
+        .bind(48_i64)
+        .execute(&pool)
+        .await
+        .expect("checksum should be corrupted");
+
+    let canonical = runtime_state_migrator();
+    repair_line_ending_migration_checksums(&pool, &canonical)
+        .await
+        .expect("repair should succeed");
+    assert!(
+        canonical.run(&pool).await.is_err(),
+        "a genuinely modified migration should still be rejected"
+    );
 
     pool.close().await;
 }

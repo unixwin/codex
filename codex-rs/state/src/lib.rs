@@ -19,6 +19,7 @@ mod runtime;
 mod sqlite;
 mod telemetry;
 
+pub use migrations::MigrationChecksumStatus;
 pub use model::LogEntry;
 pub use model::LogQuery;
 pub use model::LogRow;
@@ -29,6 +30,7 @@ pub use model::RolloutMigrationSkippedRollout;
 pub use model::RolloutMigrationState;
 /// Preferred entrypoint: owns configuration and metrics.
 pub use runtime::StateRuntime;
+pub use sqlite::RuntimeDbMigrationStatus;
 pub use sqlite::SqliteConfig;
 
 pub use audit::ThreadStateAuditRow;

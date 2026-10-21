@@ -2179,26 +2179,85 @@ async fn state_check(config: &Config) -> DoctorCheck {
         )
         .await;
     }
+    let mut migration_failures = Vec::new();
+    for db in config.sqlite_config().runtime_migration_status().await {
+        migration_checksum_detail(&mut details, &mut migration_failures, &db);
+    }
     rollout_stats_details(&mut details, &config.codex_home);
     standalone_release_cache_details(&mut details);
 
-    let status = if integrity_failures.is_empty() {
+    let status = if integrity_failures.is_empty() && migration_failures.is_empty() {
         CheckStatus::Ok
     } else {
         CheckStatus::Fail
     };
-    let summary = if status == CheckStatus::Ok {
+    let summary = if integrity_failures.is_empty() && migration_failures.is_empty() {
         "state paths and databases are inspectable"
-    } else {
+    } else if !integrity_failures.is_empty() {
         "state database integrity check failed"
+    } else {
+        "state database migration history does not match this build"
     };
     let mut check = DoctorCheck::new("state.paths", "state", status, summary).details(details);
-    if status == CheckStatus::Fail {
+    if !integrity_failures.is_empty() {
         check = check.remediation(
             "Move the damaged SQLite database aside, then restart the interactive CLI or app server so it can rebuild that runtime database from saved data. Other entry points may not rebuild automatically.",
         );
+    } else if !migration_failures.is_empty() {
+        check = check.remediation(
+            "The database was migrated by a build that changed a migration. Install a Codex build that matches the migration history, or move the database aside so Codex can rebuild it from saved data.",
+        );
     }
     check
+}
+
+fn migration_checksum_detail(
+    details: &mut Vec<String>,
+    migration_failures: &mut Vec<String>,
+    db: &codex_state::RuntimeDbMigrationStatus,
+) {
+    match &db.status {
+        codex_state::MigrationChecksumStatus::Consistent => {
+            details.push(format!("{} migrations: ok", db.label));
+        }
+        codex_state::MigrationChecksumStatus::LineEndingDrift { versions } => {
+            details.push(format!(
+                "{} migrations: line ending drift on {} (repaired on next start)",
+                db.label,
+                summarize_versions(versions)
+            ));
+        }
+        codex_state::MigrationChecksumStatus::Modified { version } => {
+            let message = format!(
+                "{} migrations: migration {version} does not match this build",
+                db.label
+            );
+            migration_failures.push(message.clone());
+            details.push(message);
+        }
+    }
+}
+
+fn summarize_versions(versions: &[i64]) -> String {
+    let mut ranges: Vec<(i64, i64)> = Vec::new();
+    for version in versions {
+        match ranges.last_mut() {
+            Some(last) if last.1 + 1 == *version => last.1 = *version,
+            _ => ranges.push((*version, *version)),
+        }
+    }
+    let rendered = ranges
+        .iter()
+        .map(|(start, end)| {
+            if start == end {
+                start.to_string()
+            } else {
+                format!("{start}-{end}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join(", ");
+    format!("{rendered} ({} total)", versions.len())
 }
 
 async fn sqlite_integrity_detail(
